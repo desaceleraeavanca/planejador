@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planejador Diário com Pomodoro</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Animação de gradiente para o fundo */
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(-45deg, #eff6ff, #dbeafe, #bfdbfe, #a5b4fc); /* Gradiente azul claro */
+            background-size: 400% 400%;
+            animation: gradientShift 18s ease infinite;
+            min-height: 100vh; /* Garante altura mínima */
+        }
+        /* Estilos para itens da lista de tarefas */
+        #taskList li {
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.3s ease;
+        }
+        #taskList li:hover:not(.editing) {
+            transform: translateY(-2px); /* Efeito sutil de elevação */
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.07);
+        }
+        /* Estilos para botões de ação (tarefas e pomodoro) */
+        .task-actions button, .pomodoro-controls button, .pomodoro-modes button {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            padding: 0.35rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .task-actions button:hover, .pomodoro-controls button:hover {
+            transform: scale(1.1); /* Efeito de zoom no hover */
+        }
+        /* Cores específicas para botões de ação de tarefas */
+        .remove-btn:hover { color: #dc2626; background-color: #fee2e2; } /* red-600, red-100 */
+        .edit-btn:hover { color: #4f46e5; background-color: #e0e7ff; } /* indigo-600, indigo-100 */
+        .save-btn:hover { color: #16a34a; background-color: #dcfce7; } /* green-600, green-100 */
+        .cancel-btn:hover { color: #6b7280; background-color: #f3f4f6; } /* gray-500, gray-100 */
+
+        /* Botão principal de adicionar tarefa */
+        #addTaskBtn { transition: background-color 0.3s ease-in-out, transform 0.1s ease, box-shadow 0.2s ease; }
+        #addTaskBtn:active { transform: scale(0.98); } /* Efeito de clique */
+        /* Placeholder dos inputs */
+        ::placeholder { color: #9ca3af; opacity: 1; } /* gray-400 */
+        /* Ícones Lucide */
+        i[data-lucide] { display: inline-block; vertical-align: middle; flex-shrink: 0; }
+
+        /* Estilo para tarefas completas */
+        .completed .task-name, .completed .task-time-original { text-decoration: line-through; color: #6b7280; } /* gray-500 */
+        .completed .task-time-estimated { color: #9ca3af; } /* gray-400 */
+        .completed { background-color: #f9fafb; opacity: 0.8; } /* gray-50 */
+
+        /* Estilo durante a edição de tarefas */
+        .editing .task-view { display: none; } /* Esconde visualização normal */
+        .editing .task-edit { display: flex; } /* Mostra campos de edição */
+        .task-edit { display: none; } /* Escondido por padrão */
+        .task-edit input[type="text"], .task-edit input[type="number"], .task-edit select { padding: 0.5rem; font-size: 0.875rem; } /* text-sm */
+
+        /* Anéis de foco para acessibilidade */
+        input:focus, select:focus, button:focus { outline: 2px solid transparent; outline-offset: 2px; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.5); } /* Ring-indigo-500 */
+        /* Estilo para checkboxes */
+        input[type="checkbox"] { border-radius: 0.25rem; border-color: #6b7280; color: #4f46e5; transition: all 0.2s ease-in-out; }
+        input[type="checkbox"]:checked { border-color: #4f46e5; background-color: #4f46e5; }
+        input[type="checkbox"]:focus { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3); }
+
+        /* Notificação Toast */
+        #toast {
+            position: fixed;
+            bottom: 1.5rem;
+            left: 50%;
+            transform: translateX(-50%) translateY(200%); /* Começa escondido */
+            background-color: #1f2937; /* gray-800 */
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            z-index: 50;
+            transition: transform 0.5s ease-in-out;
+            font-size: 0.875rem; /* text-sm */
+            text-align: center;
+        }
+        #toast.show {
+             transform: translateX(-50%) translateY(0); /* Mostra o toast */
+        }
+
+        /* Estilos Pomodoro */
+        #pomodoroTimerDisplay {
+             font-family: 'Courier New', Courier, monospace; /* Fonte monoespaçada para o timer */
+             letter-spacing: -0.025em; /* Ajuste fino no espaçamento */
+        }
+        /* Botões de modo Pomodoro - Atualizado */
+        .pomodoro-modes button {
+            padding: 0.5rem 0.75rem; /* Padding ajustado */
+            border: 1px solid #d1d5db; /* gray-300 */
+            border-radius: 0.375rem; /* rounded-md */
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 500;
+            color: #374151; /* gray-700 */
+            background-color: white;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            white-space: nowrap; /* Impede quebra de linha no texto */
+             /* A classe 'active' será aplicada via JS */
+        }
+        .pomodoro-modes button.active {
+            background-color: #4f46e5; /* indigo-600 */
+            color: white;
+            border-color: #4f46e5;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
+        .pomodoro-modes button:hover:not(.active) { background-color: #f0f0f0; } /* Fundo levemente cinza no hover */
+        /* Botões de controle Pomodoro */
+        .pomodoro-controls button { border-radius: 0.375rem; padding: 0.6rem; }
+        .pomodoro-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #pomodoroStartBtn { background-color: #10b981; color: white; } /* emerald-500 */
+        #pomodoroStartBtn:hover:not(:disabled) { background-color: #059669; } /* emerald-600 */
+        #pomodoroPauseBtn { background-color: #f59e0b; color: white; } /* amber-500 */
+        #pomodoroPauseBtn:hover:not(:disabled) { background-color: #d97706; } /* amber-600 */
+        #pomodoroResetBtn { background-color: #6b7280; color: white; } /* gray-500 */
+        #pomodoroResetBtn:hover:not(:disabled) { background-color: #4b5563; } /* gray-600 */
+
+    </style>
+</head>
+<body class="p-4 md:p-8 flex items-start justify-center">
+    <div class="container w-full max-w-6xl bg-white p-6 md:p-10 rounded-xl shadow-2xl">
+        <div class="flex flex-col sm:flex-row items-center justify-between mb-8 pb-4 border-b border-gray-200">
+            <div class="flex items-center mb-4 sm:mb-0">
+                <i data-lucide="list-checks" class="h-8 w-8 text-indigo-600 mr-3"></i>
+                <h1 class="text-3xl font-bold text-gray-800">Planejador Diário</h1>
+            </div>
+            <button id="clearAllBtn" class="flex items-center text-sm text-red-600 hover:text-red-800 font-medium transition duration-150 ease-in-out">
+                <i data-lucide="trash-2" class="h-4 w-4 mr-1"></i>
+                Limpar Tudo
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-5 lg:gap-10 xl:gap-12">
+
+            <div class="lg:col-span-3">
+                <div class="mb-8 p-5 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100 shadow-sm">
+                    <h2 class="text-xl font-semibold mb-4 text-indigo-800 flex items-center">
+                        <i data-lucide="plus-circle" class="h-6 w-6 mr-2"></i>
+                        Adicionar Nova Tarefa
+                    </h2>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                        <div class="md:col-span-5">
+                            <label for="taskName" class="block text-sm font-medium text-gray-700 mb-1">Tarefa:</label>
+                            <input type="text" id="taskName" placeholder="O que precisa ser feito?" class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-150">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="taskDuration" class="block text-sm font-medium text-gray-700 mb-1">Duração:</label>
+                            <input type="number" id="taskDuration" min="1" placeholder="Tempo" class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-150">
+                        </div>
+                        <div class="md:col-span-3">
+                            <label for="taskUnit" class="block text-sm font-medium text-gray-700 mb-1">Unidade:</label>
+                            <select id="taskUnit" class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-150">
+                                <option value="minutes">Minutos</option>
+                                <option value="hours">Horas</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <button id="addTaskBtn" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold py-2.5 px-4 rounded-lg shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-200 ease-in-out flex items-center justify-center">
+                                <i data-lucide="plus" class="mr-1.5 h-5 w-5"></i> Adicionar
+                            </button>
+                        </div>
+                    </div>
+                    <p id="errorMsg" class="text-red-600 text-sm mt-3 hidden font-medium"></p>
+                </div>
+
+                <div class="mb-8">
+                    <h2 class="text-2xl font-semibold mb-5 text-gray-700 flex items-center">
+                        <i data-lucide="clipboard-list" class="h-7 w-7 mr-2 text-purple-600"></i>
+                        Suas Tarefas
+                    </h2>
+                    <ul id="taskList" class="space-y-3">
+                        <li id="noTasksMsg" class="text-center text-gray-500 italic py-6 px-4 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                            <i data-lucide="info" class="h-5 w-5 mr-1 inline-block"></i> Nenhuma tarefa adicionada ainda. Comece a planejar!
+                        </li>
+                        </ul>
+                </div>
+
+                <div class="mt-10 pt-8 border-t-2 border-indigo-100">
+                    <div class="flex flex-col sm:flex-row justify-center items-center text-center sm:text-left gap-4 sm:gap-8">
+                        <div>
+                           <h3 class="text-lg font-semibold text-gray-800 mb-1 flex items-center justify-center sm:justify-start">
+                               <i data-lucide="timer" class="h-5 w-5 mr-2 text-gray-600"></i>
+                               Tempo Total Estimado
+                           </h3>
+                           <p id="totalTime" class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mt-1 mb-1">
+                               00:00
+                           </p>
+                            <p class="text-xs text-gray-500">(Apenas tarefas pendentes)</p>
+                       </div>
+                       <div class="border-l border-gray-200 pl-4 sm:pl-8 py-2">
+                            <label for="includeBuffer" class="flex items-center space-x-2 cursor-pointer text-sm font-medium text-gray-700 select-none">
+                               <input type="checkbox" id="includeBuffer" class="rounded border-gray-400 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-offset-0 focus:ring-indigo-200 focus:ring-opacity-50">
+                               <span>Incluir margem de 20%</span>
+                               <i data-lucide="info" class="h-4 w-4 text-gray-400" title="Adiciona 20% ao tempo de cada tarefa para imprevistos."></i>
+                           </label>
+                        </div>
+                   </div>
+               </div>
+            </div>
+
+            <div class="lg:col-span-2">
+                 <div class="p-6 bg-gray-50 rounded-lg border border-gray-200 shadow-sm sticky top-8">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+                        <i data-lucide="alarm-clock" class="h-6 w-6 mr-2 text-orange-500"></i>
+                        Pomodoro Timer
+                    </h2>
+
+                    <div class="pomodoro-modes flex flex-wrap justify-center gap-2 mb-6">
+                        <button data-mode="pomodoro" class="active">Pomodoro (25m)</button>
+                        <button data-mode="shortBreak">Pausa Curta (5m)</button>
+                        <button data-mode="longBreak">Pausa Longa (15m)</button>
+                    </div>
+
+                    <div class="text-center mb-5">
+                        <p id="pomodoroTimerDisplay" class="text-6xl md:text-7xl font-bold text-gray-800">
+                            25:00
+                        </p>
+                        <p id="pomodoroCycleDisplay" class="text-sm text-gray-500 mt-1">Ciclo: 0 / 4</p>
+                    </div>
+
+                    <div class="pomodoro-controls flex justify-center space-x-3">
+                        <button id="pomodoroStartBtn" aria-label="Iniciar temporizador">
+                            <i data-lucide="play" class="h-6 w-6"></i>
+                        </button>
+                        <button id="pomodoroPauseBtn" disabled aria-label="Pausar temporizador">
+                            <i data-lucide="pause" class="h-6 w-6"></i>
+                        </button>
+                        <button id="pomodoroResetBtn" aria-label="Reiniciar temporizador">
+                            <i data-lucide="rotate-cw" class="h-6 w-6"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div> </div> <div id="toast" role="alert" aria-live="assertive"></div>
+
+    <script>
+        // === Constantes ===
+        const BUFFER_MULTIPLIER = 1.20; // Multiplicador para a margem de tempo
+        const TASKS_STORAGE_KEY = 'dailyPlannerTasks_v3'; // Chave para localStorage (tarefas)
+        const BUFFER_STORAGE_KEY = 'dailyPlannerBufferPref_v3'; // Chave para localStorage (preferência de buffer)
+        const POMODORO_STATE_KEY = 'dailyPlannerPomodoroState_v3'; // Chave para localStorage (estado pomodoro)
+
+        // Durações Pomodoro (em segundos)
+        const POMODORO_DURATION = 25 * 60; // 25 minutos
+        const SHORT_BREAK_DURATION = 5 * 60; // 5 minutos
+        const LONG_BREAK_DURATION = 15 * 60; // 15 minutos
+        const CYCLES_BEFORE_LONG_BREAK = 4; // Número de ciclos Pomodoro antes de uma pausa longa
+
+        // === Elementos do DOM ===
+        // Elementos do Planejador
+        const taskNameInput = document.getElementById('taskName');
+        const taskDurationInput = document.getElementById('taskDuration');
+        const taskUnitSelect = document.getElementById('taskUnit');
+        const addTaskBtn = document.getElementById('addTaskBtn');
+        const taskListUl = document.getElementById('taskList');
+        const totalTimeP = document.getElementById('totalTime');
+        const errorMsgP = document.getElementById('errorMsg');
+        const noTasksMsgLi = document.getElementById('noTasksMsg');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const includeBufferCheckbox = document.getElementById('includeBuffer');
+        const toastElement = document.getElementById('toast');
+
+        // Elementos do Pomodoro
+        const pomodoroTimerDisplay = document.getElementById('pomodoroTimerDisplay');
+        const pomodoroCycleDisplay = document.getElementById('pomodoroCycleDisplay');
+        const pomodoroStartBtn = document.getElementById('pomodoroStartBtn');
+        const pomodoroPauseBtn = document.getElementById('pomodoroPauseBtn');
+        const pomodoroResetBtn = document.getElementById('pomodoroResetBtn');
+        const pomodoroModeButtons = document.querySelectorAll('.pomodoro-modes button');
+
+        // === Estado da Aplicação ===
+        // Estado do Planejador
+        let tasks = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY)) || []; // Carrega tarefas salvas ou inicializa array vazio
+        let includeBuffer = JSON.parse(localStorage.getItem(BUFFER_STORAGE_KEY)) || false; // Carrega preferência de buffer ou usa false
+        let toastTimeout; // Variável para controlar o timeout do toast
+
+        // Estado do Pomodoro
+        let pomodoroState = 'stopped'; // Estados possíveis: 'stopped', 'running', 'paused'
+        let currentMode = 'pomodoro'; // Modos possíveis: 'pomodoro', 'shortBreak', 'longBreak'
+        let timeLeft = POMODORO_DURATION; // Tempo restante em segundos
+        let pomodoroCycle = 0; // Contador de ciclos Pomodoro completados
+        let timerId = null; // ID do setInterval para o timer
+        let initialTitle = document.title; // Guarda o título original da página
+
+        // === Síntese de Som (Tone.js) ===
+        let synth = null; // Objeto do sintetizador Tone.js
+        // Inicializa o áudio na primeira interação do usuário (necessário em alguns browsers)
+        function initializeAudio() {
+            if (!synth && window.Tone) { // Verifica se Tone.js está carregado
+                synth = new Tone.Synth().toDestination();
+                // Toca um buffer silencioso para "desbloquear" o contexto de áudio
+                Tone.start();
+                console.log("Contexto de Áudio Tone.js iniciado.");
+            }
+        }
+        // Função para tocar o som de notificação
+        function playSound() {
+            if (synth) {
+                try {
+                    // Toca duas notas simples como alerta
+                    synth.triggerAttackRelease("C5", "8n", Tone.now()); // Nota C5, duração de colcheia
+                    synth.triggerAttackRelease("G5", "8n", Tone.now() + 0.2); // Nota G5, 0.2s depois
+                } catch (error) {
+                    console.error("Erro ao tocar som:", error);
+                }
+            } else {
+                console.warn("Sintetizador Tone.js não inicializado.");
+            }
+        }
+
+        // === Funções Utilitárias ===
+        /**
+         * Formata segundos totais para o formato MM:SS.
+         * @param {number} totalSeconds - O número total de segundos.
+         * @returns {string} O tempo formatado como "MM:SS".
+         */
+        function formatTime(totalSeconds) {
+            if (isNaN(totalSeconds) || totalSeconds < 0) return "00:00";
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            // padStart garante que sempre tenhamos dois dígitos (ex: 05:09)
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        /**
+         * Formata a duração original da tarefa (ex: "30min", "2h").
+         * @param {number} duration - O valor numérico da duração.
+         * @param {string} unit - A unidade ('minutes' ou 'hours').
+         * @returns {string} A duração original formatada.
+         */
+        function formatOriginalTime(duration, unit) {
+            return `${duration}${unit === 'minutes' ? 'min' : 'h'}`;
+        }
+
+        /** Salva o estado do planejador (tarefas e buffer) no localStorage. */
+        function savePlannerState() {
+            localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+            localStorage.setItem(BUFFER_STORAGE_KEY, JSON.stringify(includeBuffer));
+        }
+
+        /** Salva o estado atual do Pomodoro no localStorage. */
+        function savePomodoroState() {
+            const state = { pomodoroState, currentMode, timeLeft, pomodoroCycle };
+            localStorage.setItem(POMODORO_STATE_KEY, JSON.stringify(state));
+        }
+
+        /** Carrega o estado do Pomodoro do localStorage. */
+        function loadPomodoroState() {
+            const savedState = JSON.parse(localStorage.getItem(POMODORO_STATE_KEY));
+            if (savedState) {
+                pomodoroState = savedState.pomodoroState || 'stopped';
+                currentMode = savedState.currentMode || 'pomodoro';
+                timeLeft = savedState.timeLeft || getDurationForMode(currentMode); // Garante que timeLeft seja válido
+                pomodoroCycle = savedState.pomodoroCycle || 0;
+
+                // Importante: Se a página recarregou com o timer rodando, muda para pausado/parado
+                // para evitar contagem incorreta enquanto a página estava fechada.
+                if (pomodoroState === 'running') {
+                    pomodoroState = 'paused'; // Ou 'stopped', dependendo da preferência
+                }
+            }
+            // Define o tempo inicial baseado no modo carregado, caso não haja estado salvo
+             else {
+                 timeLeft = getDurationForMode(currentMode);
+             }
+            // updatePomodoroUI(); // Chamado na inicialização geral
+        }
+
+        /**
+         * Mostra uma notificação toast temporária.
+         * @param {string} message - A mensagem a ser exibida.
+         */
+        function showToast(message) {
+             clearTimeout(toastTimeout); // Limpa timeout anterior, se houver
+            toastElement.textContent = message;
+            toastElement.classList.add('show');
+             // Esconde o toast após 3 segundos
+             toastTimeout = setTimeout(() => {
+                toastElement.classList.remove('show');
+            }, 3000);
+        }
+
+        /** Limpa mensagens de erro e destaques vermelhos dos inputs. */
+        function clearError() {
+            errorMsgP.classList.add('hidden'); // Esconde a mensagem de erro
+            // Remove classes de erro dos inputs
+            taskNameInput.classList.remove('border-red-500', 'ring-red-500');
+            taskDurationInput.classList.remove('border-red-500', 'ring-red-500');
+        }
+
+        // === Lógica Principal do Planejador ===
+        /**
+         * Calcula a duração em minutos incluindo o buffer, se ativo.
+         * @param {number} durationInMinutes - Duração original em minutos.
+         * @returns {number} Duração com buffer (ou original se buffer inativo).
+         */
+        function calculateDurationWithBuffer(durationInMinutes) {
+            return includeBuffer ? durationInMinutes * BUFFER_MULTIPLIER : durationInMinutes;
+        }
+
+        /** Calcula e exibe o tempo total estimado para tarefas pendentes. */
+        function calculateTotalTime() {
+            // Soma a duração (com buffer) apenas das tarefas não completas
+            const totalMinutes = tasks.reduce((sum, task) => {
+                return task.isComplete ? sum : sum + task.durationWithBuffer;
+            }, 0);
+            // Usa a função formatTime para exibir no formato MM:SS (ou HH:MM se preferir ajustar formatTime)
+            totalTimeP.textContent = formatTime(Math.round(totalMinutes * 60));
+        }
+
+        /**
+         * Cria e retorna o elemento HTML (<li>) para uma tarefa.
+         * @param {object} task - O objeto da tarefa.
+         * @returns {HTMLElement} O elemento <li> da tarefa.
+         */
+        function renderTask(task) {
+            const li = document.createElement('li');
+            // Define classes CSS, incluindo 'completed' se a tarefa estiver completa
+            li.className = `relative flex flex-col sm:flex-row items-start sm:items-center p-4 bg-white border border-gray-200 rounded-lg shadow-sm ${task.isComplete ? 'completed' : ''}`;
+            li.dataset.taskId = task.id; // Armazena o ID da tarefa no elemento
+
+            // Calcula a duração em minutos e recalcula com buffer atual ao renderizar
+            const durationInMinutes = task.originalUnit === 'hours' ? task.originalDuration * 60 : task.originalDuration;
+            task.durationWithBuffer = calculateDurationWithBuffer(durationInMinutes); // Garante que o buffer esteja atualizado
+
+            // Define o HTML interno do item da lista
+            li.innerHTML = `
+                <div class="flex items-center w-full sm:w-auto mb-3 sm:mb-0 sm:mr-4">
+                    <input type="checkbox" data-action="toggle" class="mr-3 h-5 w-5 cursor-pointer focus:ring-offset-white" ${task.isComplete ? 'checked' : ''} aria-label="Marcar ${task.name} como ${task.isComplete ? 'pendente' : 'concluída'}">
+
+                    <div class="flex-grow task-view">
+                        <span class="task-name font-semibold text-gray-800 text-lg block" title="${task.name}">${task.name}</span>
+                        <span class="task-time-estimated text-sm text-indigo-700 block mt-0.5">Estimado: ${formatTime(Math.round(task.durationWithBuffer * 60))}</span>
+                        <span class="task-time-original text-xs text-gray-500 block">(Original: ${formatOriginalTime(task.originalDuration, task.originalUnit)})</span>
+                    </div>
+
+                    <div class="task-edit hidden flex-grow items-end gap-2">
+                        <div class="flex-grow"><label for="edit-name-${task.id}" class="sr-only">Nome</label><input type="text" id="edit-name-${task.id}" value="${task.name}" class="w-full rounded border-gray-300 shadow-sm text-sm p-1"></div>
+                        <div class="w-20"><label for="edit-duration-${task.id}" class="sr-only">Duração</label><input type="number" id="edit-duration-${task.id}" min="1" value="${task.originalDuration}" class="w-full rounded border-gray-300 shadow-sm text-sm p-1"></div>
+                        <div class="w-28"><label for="edit-unit-${task.id}" class="sr-only">Unidade</label><select id="edit-unit-${task.id}" class="w-full rounded border-gray-300 shadow-sm text-sm p-1"><option value="minutes" ${task.originalUnit === 'minutes' ? 'selected' : ''}>Minutos</option><option value="hours" ${task.originalUnit === 'hours' ? 'selected' : ''}>Horas</option></select></div>
+                        <button data-action="save" class="save-btn text-green-500" aria-label="Salvar alterações"><i data-lucide="check-circle" class="h-5 w-5"></i></button>
+                        <button data-action="cancel" class="cancel-btn text-gray-500" aria-label="Cancelar edição"><i data-lucide="x-circle" class="h-5 w-5"></i></button>
+                    </div>
+                </div>
+
+                <div class="task-actions flex items-center space-x-1 sm:ml-auto absolute top-2 right-2 sm:static">
+                    <button data-action="edit" class="edit-btn text-indigo-500" aria-label="Editar tarefa ${task.name}"><i data-lucide="pencil" class="h-5 w-5"></i></button>
+                    <button data-action="remove" class="remove-btn text-red-500" aria-label="Remover tarefa ${task.name}"><i data-lucide="trash-2" class="h-5 w-5"></i></button>
+                </div>`;
+            return li; // Retorna o elemento <li> criado
+        }
+
+        /** Renderiza a lista completa de tarefas na UI. */
+        function renderTaskList() {
+            taskListUl.innerHTML = ''; // Limpa a lista atual
+            taskListUl.appendChild(noTasksMsgLi); // Readiciona a mensagem padrão (será escondida se houver tarefas)
+
+            if (tasks.length === 0) {
+                noTasksMsgLi.style.display = 'list-item'; // Mostra a mensagem se não houver tarefas
+            } else {
+                noTasksMsgLi.style.display = 'none'; // Esconde a mensagem
+                // Ordena: tarefas pendentes primeiro, depois por ID (ordem de criação)
+                tasks.sort((a, b) => a.isComplete - b.isComplete || a.id - b.id);
+                // Cria e adiciona cada elemento de tarefa à lista <ul>
+                tasks.forEach(task => taskListUl.appendChild(renderTask(task)));
+            }
+
+            calculateTotalTime(); // Recalcula o tempo total
+            savePlannerState(); // Salva o estado atual no localStorage
+            lucide.createIcons(); // Renderiza quaisquer ícones Lucide adicionados dinamicamente
+        }
+
+        /** Adiciona uma nova tarefa à lista. */
+        function addTask() {
+            clearError(); // Limpa erros anteriores
+            // Pega valores dos inputs
+            const name = taskNameInput.value.trim();
+            const duration = parseFloat(taskDurationInput.value);
+            const unit = taskUnitSelect.value;
+            let isValid = true; // Flag de validação
+
+            // Valida o nome
+            if (!name) {
+                errorMsgP.textContent = 'Qual o nome da tarefa?';
+                errorMsgP.classList.remove('hidden');
+                taskNameInput.classList.add('border-red-500', 'ring-red-500');
+                if (isValid) taskNameInput.focus(); // Foca no campo inválido
+                isValid = false;
+            }
+            // Valida a duração
+            if (isNaN(duration) || duration <= 0) {
+                errorMsgP.textContent = 'Informe uma duração válida (número > 0).';
+                errorMsgP.classList.remove('hidden');
+                taskDurationInput.classList.add('border-red-500', 'ring-red-500');
+                if (isValid) taskDurationInput.focus(); // Foca no campo inválido
+                isValid = false;
+            }
+
+            if (!isValid) return; // Interrompe se a validação falhar
+
+            // Converte duração para minutos se necessário
+            const durationInMinutes = unit === 'hours' ? duration * 60 : duration;
+            // Cria o novo objeto de tarefa
+            const newTask = {
+                id: Date.now(), // ID único baseado no timestamp
+                name: name,
+                originalDuration: duration,
+                originalUnit: unit,
+                durationWithBuffer: calculateDurationWithBuffer(durationInMinutes), // Calcula com buffer atual
+                isComplete: false // Começa como pendente
+            };
+
+            tasks.push(newTask); // Adiciona ao array de tarefas
+            renderTaskList(); // Atualiza a UI
+            showToast(`Tarefa "${newTask.name}" adicionada.`); // Mostra notificação
+
+            // Limpa o formulário e foca no nome para adicionar a próxima
+            taskNameInput.value = '';
+            taskDurationInput.value = '';
+            taskUnitSelect.value = 'minutes';
+            taskNameInput.focus();
+        }
+
+        /**
+         * Remove uma tarefa da lista.
+         * @param {number} taskId - O ID da tarefa a ser removida.
+         */
+        function removeTask(taskId) {
+            const taskIndex = tasks.findIndex(t => t.id === taskId); // Encontra o índice da tarefa
+            if (taskIndex > -1) {
+                 const taskName = tasks[taskIndex].name;
+                 // Pede confirmação ao usuário
+                 if (window.confirm(`Tem certeza que deseja remover a tarefa "${taskName}"?`)) {
+                     tasks.splice(taskIndex, 1); // Remove a tarefa do array
+                     renderTaskList(); // Atualiza a UI
+                     showToast(`Tarefa "${taskName}" removida.`); // Mostra notificação
+                 }
+            }
+        }
+
+        /**
+         * Alterna o estado de conclusão de uma tarefa.
+         * @param {number} taskId - O ID da tarefa.
+         */
+        function toggleComplete(taskId) {
+            const task = tasks.find(t => t.id === taskId); // Encontra a tarefa
+            if (task) {
+                task.isComplete = !task.isComplete; // Inverte o estado
+                renderTaskList(); // Atualiza a UI (para reordenar e mudar estilo)
+                showToast(`Tarefa "${task.name}" marcada como ${task.isComplete ? 'concluída' : 'pendente'}.`);
+            }
+        }
+
+        /**
+         * Inicia o modo de edição para uma tarefa.
+         * @param {number} taskId - O ID da tarefa.
+         * @param {HTMLElement} liElement - O elemento <li> da tarefa.
+         */
+        function startEditing(taskId, liElement) {
+            liElement.classList.add('editing'); // Adiciona classe para mostrar campos de edição
+            // Foca no campo de nome para facilitar a edição
+            const nameInput = liElement.querySelector('.task-edit input[type="text"]');
+            if (nameInput) { nameInput.focus(); nameInput.select(); }
+            lucide.createIcons(); // Garante que ícones de salvar/cancelar sejam renderizados
+        }
+
+        /**
+         * Cancela o modo de edição.
+         * @param {HTMLElement} liElement - O elemento <li> que estava sendo editado.
+         */
+        function cancelEditing(liElement) {
+            liElement.classList.remove('editing'); // Remove a classe de edição
+            renderTaskList(); // Re-renderiza para garantir consistência (poderia otimizar para renderizar só este item)
+        }
+
+        /**
+         * Salva as alterações feitas em uma tarefa.
+         * @param {number} taskId - O ID da tarefa.
+         * @param {HTMLElement} liElement - O elemento <li> da tarefa.
+         */
+        function saveEdit(taskId, liElement) {
+            const taskIndex = tasks.findIndex(t => t.id === taskId);
+            if (taskIndex === -1) return; // Segurança: tarefa não encontrada
+
+            // Pega os novos valores dos campos de edição
+            const nameInput = liElement.querySelector(`#edit-name-${taskId}`);
+            const durationInput = liElement.querySelector(`#edit-duration-${taskId}`);
+            const unitInput = liElement.querySelector(`#edit-unit-${taskId}`);
+            const newName = nameInput.value.trim();
+            const newDuration = parseFloat(durationInput.value);
+            const newUnit = unitInput.value;
+
+            // Validação básica dos campos editados
+            let isValid = true;
+            if (!newName) { showToast("O nome da tarefa não pode ficar vazio."); nameInput.focus(); isValid = false; }
+            if (isNaN(newDuration) || newDuration <= 0) { showToast("A duração deve ser um número maior que zero."); durationInput.focus(); isValid = false; }
+            if (!isValid) return; // Interrompe se inválido
+
+            // Atualiza o objeto da tarefa no array
+            const task = tasks[taskIndex];
+            task.name = newName;
+            task.originalDuration = newDuration;
+            task.originalUnit = newUnit;
+            // Recalcula duração com buffer
+            const durationInMinutes = newUnit === 'hours' ? newDuration * 60 : newDuration;
+            task.durationWithBuffer = calculateDurationWithBuffer(durationInMinutes);
+
+            liElement.classList.remove('editing'); // Sai do modo de edição
+            renderTaskList(); // Atualiza a UI
+            showToast(`Tarefa "${task.name}" atualizada.`);
+        }
+
+        /** Remove todas as tarefas da lista após confirmação. */
+        function clearAllTasks() {
+            if (tasks.length === 0) { showToast("Nenhuma tarefa para limpar."); return; }
+            // Pede confirmação
+            if (window.confirm(`Tem certeza que deseja remover TODAS as ${tasks.length} tarefas? Esta ação não pode ser desfeita.`)) {
+                tasks = []; // Esvazia o array de tarefas
+                renderTaskList(); // Atualiza a UI
+                showToast("Todas as tarefas foram removidas.");
+            }
+        }
+
+        /** Manipula a mudança no checkbox de incluir buffer. */
+        function handleBufferToggle() {
+            includeBuffer = includeBufferCheckbox.checked; // Atualiza o estado do buffer
+            // Recalcula a duração com buffer para todas as tarefas
+            tasks.forEach(task => {
+                const durationInMinutes = task.originalUnit === 'hours' ? task.originalDuration * 60 : task.originalDuration;
+                task.durationWithBuffer = calculateDurationWithBuffer(durationInMinutes);
+            });
+            renderTaskList(); // Atualiza a UI (tempos das tarefas e total)
+            showToast(`Margem de ${includeBuffer ? '20% incluída' : 'removida'}.`);
+        }
+
+        // === Lógica do Pomodoro ===
+        /**
+         * Retorna a duração em segundos para um dado modo Pomodoro.
+         * @param {string} mode - O modo ('pomodoro', 'shortBreak', 'longBreak').
+         * @returns {number} A duração em segundos.
+         */
+        function getDurationForMode(mode) {
+            switch (mode) {
+                case 'pomodoro': return POMODORO_DURATION;
+                case 'shortBreak': return SHORT_BREAK_DURATION;
+                case 'longBreak': return LONG_BREAK_DURATION;
+                default: return POMODORO_DURATION; // Padrão para Pomodoro
+            }
+        }
+
+        /** Atualiza todos os elementos da UI do Pomodoro. */
+        function updatePomodoroUI() {
+            // Atualiza o display do tempo restante
+            pomodoroTimerDisplay.textContent = formatTime(timeLeft);
+
+            // Atualiza o título da aba do navegador
+            if (pomodoroState === 'running') {
+                document.title = `${formatTime(timeLeft)} - ${currentMode === 'pomodoro' ? 'Foco' : 'Pausa'} | ${initialTitle}`;
+            } else {
+                document.title = initialTitle; // Restaura título original se parado/pausado
+            }
+
+            // Atualiza o display de ciclos
+            pomodoroCycleDisplay.textContent = `Ciclo: ${pomodoroCycle % CYCLES_BEFORE_LONG_BREAK} / ${CYCLES_BEFORE_LONG_BREAK}`;
+
+            // Atualiza a aparência dos botões de modo (destaca o ativo)
+            pomodoroModeButtons.forEach(button => {
+                button.classList.toggle('active', button.dataset.mode === currentMode);
+            });
+
+            // Atualiza o estado habilitado/desabilitado dos botões de controle
+            pomodoroStartBtn.disabled = pomodoroState === 'running';
+            pomodoroPauseBtn.disabled = pomodoroState !== 'running';
+            // pomodoroResetBtn sempre habilitado
+
+            savePomodoroState(); // Salva o estado atual sempre que a UI é atualizada
+        }
+
+        /** Função chamada a cada segundo pelo setInterval quando o timer está rodando. */
+        function tick() {
+            if (timeLeft <= 0) {
+                handleTimerEnd(); // Chama a função de fim de ciclo se o tempo acabou
+            } else {
+                timeLeft--; // Decrementa o tempo restante
+                updatePomodoroUI(); // Atualiza a UI
+            }
+        }
+
+        /** Inicia o temporizador Pomodoro. */
+        function startPomodoroTimer() {
+            if (pomodoroState !== 'running') {
+                 initializeAudio(); // Garante que o áudio está pronto
+                pomodoroState = 'running';
+                clearInterval(timerId); // Limpa intervalo anterior (segurança)
+                timerId = setInterval(tick, 1000); // Inicia o intervalo de 1 segundo
+                updatePomodoroUI();
+                showToast(`Temporizador ${currentMode === 'pomodoro' ? 'Pomodoro' : 'de Pausa'} iniciado!`);
+            }
+        }
+
+        /** Pausa o temporizador Pomodoro. */
+        function pausePomodoroTimer() {
+            if (pomodoroState === 'running') {
+                pomodoroState = 'paused';
+                clearInterval(timerId); // Para o intervalo
+                timerId = null;
+                updatePomodoroUI();
+                showToast("Temporizador pausado.");
+            }
+        }
+
+        /** Reinicia o temporizador Pomodoro para o modo atual. */
+        function resetPomodoroTimer() {
+            pomodoroState = 'stopped';
+            clearInterval(timerId); // Para o intervalo
+            timerId = null;
+            timeLeft = getDurationForMode(currentMode); // Reseta o tempo para o modo atual
+            updatePomodoroUI();
+            showToast("Temporizador reiniciado.");
+        }
+
+        /**
+         * Seleciona um novo modo Pomodoro (Pomodoro, Pausa Curta, Pausa Longa).
+         * @param {string} mode - O modo a ser selecionado.
+         */
+        function selectPomodoroMode(mode) {
+            // Se o timer estiver rodando, pede confirmação para reiniciar
+            if (pomodoroState === 'running') {
+                 if (!window.confirm("O temporizador está rodando. Mudar o modo irá reiniciá-lo. Continuar?")) {
+                     return; // Usuário cancelou
+                 }
+            }
+             // Para o timer atual se estiver rodando ou pausado
+             if (pomodoroState !== 'stopped') {
+                 resetPomodoroTimer(); // Resetar limpa o intervalo e define estado como 'stopped'
+             }
+
+            currentMode = mode; // Define o novo modo
+            timeLeft = getDurationForMode(mode); // Define o tempo para o novo modo
+            updatePomodoroUI(); // Atualiza a UI
+            showToast(`Modo alterado para ${mode === 'pomodoro' ? 'Pomodoro' : (mode === 'shortBreak' ? 'Pausa Curta' : 'Pausa Longa')}.`);
+        }
+
+        /** Função chamada quando o tempo de um ciclo (Pomodoro ou Pausa) termina. */
+        function handleTimerEnd() {
+            clearInterval(timerId); // Para o intervalo
+            timerId = null;
+            pomodoroState = 'stopped'; // Define estado como parado
+            playSound(); // Toca o som de notificação
+
+            let nextMode; // Próximo modo a ser iniciado
+            let message; // Mensagem para o toast
+
+            // Determina o próximo modo baseado no modo atual
+            if (currentMode === 'pomodoro') {
+                pomodoroCycle++; // Incrementa o contador de ciclos Pomodoro
+                // Verifica se é hora da pausa longa
+                if (pomodoroCycle > 0 && pomodoroCycle % CYCLES_BEFORE_LONG_BREAK === 0) {
+                    nextMode = 'longBreak';
+                    message = `Ciclo Pomodoro ${pomodoroCycle} completo! Hora da pausa longa (${LONG_BREAK_DURATION / 60} min).`;
+                } else {
+                    nextMode = 'shortBreak';
+                    message = `Ciclo Pomodoro ${pomodoroCycle} completo! Hora da pausa curta (${SHORT_BREAK_DURATION / 60} min).`;
+                }
+            } else { // Se uma pausa terminou, volta para Pomodoro
+                nextMode = 'pomodoro';
+                message = "Pausa finalizada! Hora de focar.";
+            }
+
+            showToast(message); // Mostra notificação
+            selectPomodoroMode(nextMode); // Muda para o próximo modo (isso também reseta o timer)
+
+            // Opcional: Iniciar automaticamente o próximo timer?
+            // Descomente a linha abaixo para iniciar automaticamente após 1 segundo
+            // setTimeout(startPomodoroTimer, 1000);
+        }
+
+
+        // === Event Listeners (Ouvintes de Eventos) ===
+        // --- Planejador ---
+        addTaskBtn.addEventListener('click', addTask); // Botão Adicionar Tarefa
+        // Inputs do formulário (ouvir 'Enter' para adicionar)
+        [taskNameInput, taskDurationInput, taskUnitSelect].forEach(input => {
+            input.addEventListener('keypress', function(event) {
+                 clearError(); // Limpa erro ao digitar
+                if (event.key === 'Enter') {
+                    event.preventDefault(); // Impede envio padrão do formulário
+                    addTask(); // Adiciona tarefa
+                }
+            });
+        });
+        // Delegação de eventos na lista de tarefas (para botões de toggle, edit, remove, save, cancel)
+        taskListUl.addEventListener('click', (event) => {
+            const target = event.target;
+            // Encontra o elemento pai mais próximo com o atributo 'data-action'
+            const actionElement = target.closest('[data-action]');
+            if (!actionElement) return; // Sai se o clique não foi em um elemento de ação
+
+            // Encontra o item da lista (<li>) pai
+            const liElement = actionElement.closest('li[data-task-id]');
+            if (!liElement) return; // Segurança: não deveria acontecer
+
+            const taskId = parseInt(liElement.dataset.taskId, 10); // Pega o ID da tarefa
+            const action = actionElement.dataset.action; // Pega a ação (ex: 'remove', 'edit')
+
+            // Executa a ação correspondente
+            switch (action) {
+                case 'toggle':
+                    // Garante que o clique foi no checkbox
+                    if (target.type === 'checkbox') { toggleComplete(taskId); }
+                    break;
+                case 'remove': removeTask(taskId); break;
+                case 'edit': startEditing(taskId, liElement); break;
+                case 'save': saveEdit(taskId, liElement); break;
+                case 'cancel':
+                     // Encontra o item que está sendo editado e cancela
+                    const currentlyEditing = taskListUl.querySelector('li.editing');
+                    if (currentlyEditing) { cancelEditing(currentlyEditing); }
+                    break;
+            }
+        });
+        clearAllBtn.addEventListener('click', clearAllTasks); // Botão Limpar Tudo
+        includeBufferCheckbox.addEventListener('change', handleBufferToggle); // Checkbox Incluir Buffer
+
+        // --- Pomodoro ---
+        pomodoroStartBtn.addEventListener('click', startPomodoroTimer); // Botão Iniciar
+        pomodoroPauseBtn.addEventListener('click', pausePomodoroTimer); // Botão Pausar
+        pomodoroResetBtn.addEventListener('click', resetPomodoroTimer); // Botão Reiniciar
+        // Botões de seleção de modo
+        pomodoroModeButtons.forEach(button => {
+            button.addEventListener('click', () => selectPomodoroMode(button.dataset.mode));
+        });
+
+        // === Inicialização da Aplicação ===
+        /** Função principal que inicializa o aplicativo ao carregar a página. */
+        function initializeApp() {
+            initialTitle = document.title; // Guarda o título original
+            includeBufferCheckbox.checked = includeBuffer; // Define o estado inicial do checkbox de buffer
+            loadPomodoroState(); // Carrega o estado salvo do Pomodoro
+            renderTaskList(); // Renderiza a lista de tarefas inicial
+            updatePomodoroUI(); // Atualiza a UI do Pomodoro com o estado carregado/inicial
+            lucide.createIcons(); // Renderiza todos os ícones Lucide na página
+        }
+
+        // Chama a inicialização quando o DOM estiver pronto
+        document.addEventListener('DOMContentLoaded', initializeApp);
+
+    </script>
+</body>
+</html>
